@@ -1,0 +1,15 @@
+build-essential 
+ca-certificates
+cmake
+gfortran
+libbz2-dev
+libssl-dev
+libtbb-dev
+libx11-dev 
+libxext-dev 
+libxft-dev 
+libxpm-dev
+make
+makedepf90
+unzip
+wget

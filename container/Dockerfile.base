@@ -1,0 +1,12 @@
+FROM ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+WORKDIR /opt
+
+COPY packages packages
+
+RUN apt update -y
+RUN apt install -y --no-install-recommends $(cat packages)
+RUN apt-get autoremove -y && apt-get clean -y \
+  && rm -rf /var/lib/apt/lists/* \
+  && rm -f packages

@@ -1,0 +1,139 @@
+#!/bin/bash
+
+ROOT_DL="https://root.cern/download/root_v6.36.02.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz"
+GIBUU_DL="https://github.com/kvtsang/GiBUU/archive/refs/heads/main.zip"
+ROOTTUPLE_DL="https://github.com/kvtsang/GiBUU-RootTuple/archive/refs/heads/main.zip"
+BUUINPUT_DL="https://gibuu.hepforge.org/downloads?f=buuinput2025.tar.gz"
+
+GIBUU_DIR="GiBUU-main"
+ROOTTUPLE_DIR="GiBUU-RootTuple-main"
+
+die() {
+  echo "$@" >&2
+  exit 1
+}
+
+help() {
+  cat <<-_EOF
+$PROGRAM: install GiBUU to a user directory
+
+Note
+====
+The patched GiBUU is installed to the directory where the script is executed.
+The script is intended to be used in container.
+
+Usage
+=====
+$PROGRAM download
+    Download following files to current directory:
+    - $ROOT_DL
+    - $GIBUU_DL
+    - $ROOTTUPLE_DL
+    - $BUUINPUT_DL
+
+$PROGRAM checksum
+    Run md5sum on the downloaded files.
+
+$PROGRAM unpack
+    Unzip / untar downlaod files to current directory.
+
+$PROGRAM build
+    Build GiBUU.
+
+$PROGRAM install [DEST]
+    Install GiBUU.x to DEST directory.
+
+$PROGRAM clean
+    Remove downloaded files. Only keeping the GiBUU.x binary and BUUInput data.
+_EOF
+}
+
+download() {
+  echo "Downloading ..."
+  wget $ROOT_DL \
+  && wget $GIBUU_DL -O gibuu.zip \
+  && wget $ROOTTUPLE_DL -O roottuple.zip \
+  && wget --content-disposition $BUUINPUT_DL -O buuinput.tar.gz
+
+  [[ $? -ne 0 ]] && die "Fail to download file(s)"
+}
+
+checksum() {
+  MD5SUM=$(mktemp)
+  cat <<-_EOF > $MD5SUM
+0a36db2dcb99975215a82dee1c338bc2  buuinput.tar.gz
+ed5dd1345c28f19d70b58c905ce15438  root_v6.36.02.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz
+0d94ad9b52905fdae32f53dfb68ec6f3  gibuu.zip
+f61b8d5d621043a35fe651ec8e217301  roottuple.zip
+_EOF
+
+  md5sum -c $MD5SUM && rm -f $MD5SUM || die
+}
+
+unpack() {
+  echo "Unpacking ROOT ..."
+  tar zxf $(basename $ROOT_DL) || die "Fail to unpack ROOT"
+
+  echo "Unpacking GiBUU ..."
+
+  mkdir gibuu && cd gibuu \
+  && unzip -q ../gibuu.zip \
+  && unzip -q ../roottuple.zip \
+  && tar zxf ../buuinput.tar.gz
+
+  [[ $? -ne 0 ]] && die "Fail to unpack GiBUU"
+
+  mkdir -p libraries \
+  && mv $ROOTTUPLE_DIR libraries/RootTuple
+
+  [[ $? -ne 0 ]] && die "Fail to create libraries/RootTuple"
+
+  exit 0
+}
+
+build() {
+  source root/bin/thisroot.sh
+
+  cd gibuu/${GIBUU_DIR}
+
+  mkdir -p objects/LIB/lib \
+  && make -j $(nproc) buildRootTuple \
+  && make -j $(nproc) withROOT=1 
+}
+
+install() {
+  DEST=${1:-./}
+  echo "Copying GiBUU.x to $DEST"
+
+  mkdir -p $DEST && cp gibuu/${GIBUU_DIR}/objects/GiBUU.x $DEST
+  [[ $? -ne 0 ]] && die "Fail to copy GiBUU.x"
+
+  exit 0
+}
+
+clean() {
+  echo "Removing downloads and source files ..."
+  rm -f $(basename $ROOT_DL)
+  rm -f gibuu.zip
+  rm -f roottuple.zip
+  rm -f buuinput.tar.gz
+  rm -rf gibuu/libraries
+  rm -rf gibuu/${GIBUU_DIR}
+}
+
+usage() {
+  echo "$PROGRAM downlaod|checksum|unpack|build|install|clean|help [DEST]"
+}
+
+PROGRAM="${0##*/}"
+
+case "$1" in
+  download) shift; download "$@" ;;
+  checksum) shift; checksum "$@" ;;
+  unpack)   shift; unpack "$@" ;; 
+  build)    shift; build "$@" ;; 
+  install)  shift; install "$@" ;;
+  clean)    shift; clean "$@" ;;
+  help)     shift; help ;;
+  *)        usage ;;
+esac
