@@ -2,9 +2,9 @@
 
 root_download_url="https://root.cern.ch/download/\
 root_v6.38.04.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz"
-GIBUU_DL="https://github.com/kvtsang/GiBUU.git"
-ROOTTUPLE_DL="https://github.com/kvtsang/GiBUU-RootTuple.git"
-BUUINPUT_DL="https://gibuu.hepforge.org/downloads?f=buuinput2025.tar.gz"
+gibuu_git_url="https://github.com/kvtsang/GiBUU.git"
+roottuple_git_url="https://github.com/kvtsang/GiBUU-RootTuple.git"
+buuinput_download_url="https://gibuu.hepforge.org/downloads?f=buuinput2025.tar.gz"
 
 GIBUU_BRANCH="hepforge"
 ROOTTUPLE_BRANCH="hepforge"
@@ -36,9 +36,9 @@ Usage
 $PROGRAM download
     Download following files to current directory:
     - $root_download_url (wget)
-    - $GIBUU_DL → release/ (git clone)
-    - $ROOTTUPLE_DL → libraries/RootTuple/ (git clone)
-    - $BUUINPUT_DL (wget)
+    - $gibuu_git_url → release/ (git clone)
+    - $roottuple_git_url → libraries/RootTuple/ (git clone)
+    - $buuinput_download_url (wget)
 
 $PROGRAM checksum
     Run md5sum on the downloaded files.
@@ -58,21 +58,21 @@ _EOF
 download() {
   echo "Downloading ..."
   wget -N "$root_download_url" \
-  && git_clone "$GIBUU_DL" "$GIBUU_BRANCH" release \
-  && git_clone "$ROOTTUPLE_DL" "$ROOTTUPLE_BRANCH" libraries/RootTuple \
-  && wget -N --content-disposition "$BUUINPUT_DL"
+  && git_clone "$gibuu_git_url" "$GIBUU_BRANCH" release \
+  && git_clone "$roottuple_git_url" "$ROOTTUPLE_BRANCH" libraries/RootTuple \
+  && wget -N --content-disposition "$buuinput_download_url"
 
   [[ $? -ne 0 ]] && die "Fail to download file(s)"
 }
 
 checksum() {
-  MD5SUM=$(mktemp)
-  cat <<-_EOF > $MD5SUM
+  checksum_file=$(mktemp)
+  cat <<-_EOF > $checksum_file
 6d8d5c432008831ddeea38e7b91550ee  buuinput2025.tar.gz
 af241e9b4aeb93f6fedfb5d360b31494  root_v6.38.04.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz
 _EOF
 
-  md5sum -c $MD5SUM && rm -f $MD5SUM || die
+  md5sum -c $checksum_file && rm -f $checksum_file || die
 }
 
 unpack() {
