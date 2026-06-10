@@ -1,5 +1,4 @@
 #!/bin/bash
-
 root_download_url="https://root.cern.ch/download/\
 root_v6.38.04.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz"
 gibuu_git_url="https://github.com/kvtsang/GiBUU.git"
@@ -67,13 +66,10 @@ download() {
 }
 
 checksum() {
-  checksum_file=$(mktemp)
-  cat <<-_EOF > $checksum_file
+  cat <<'_EOF' | md5sum -c || die "Checksum verification failed"
 6d8d5c432008831ddeea38e7b91550ee  buuinput2025.tar.gz
 af241e9b4aeb93f6fedfb5d360b31494  root_v6.38.04.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz
 _EOF
-
-  md5sum -c $checksum_file && rm -f $checksum_file || die
 }
 
 unpack() {
@@ -82,12 +78,10 @@ unpack() {
 
   echo "Setting up GiBUU ..."
 
-  mkdir -p gibuu && pushd gibuu
-  [[ $? -ne 0 ]] && die "Fail to \"mkdir gibuu\""
+  mkdir -p gibuu || die "Fail to create gibuu/"
+  cd gibuu || die "Fail to enter gibuu/"
 
-  tar zxf ../buuinput2025.tar.gz
-
-  [[ $? -ne 0 ]] && die "Fail to unpack GiBUU"
+  tar zxf ../buuinput2025.tar.gz || die "Fail to unpack GiBUU"
 
   exit 0
 }
@@ -95,7 +89,7 @@ unpack() {
 build() {
   source root/bin/thisroot.sh
 
-  cd release
+  cd release || die "release/ directory not found"
 
   mkdir -p objects/LIB/lib \
   && make -j $(nproc) buildRootTuple \
@@ -106,8 +100,8 @@ install() {
   DEST=${1:-./}
   echo "Copying GiBUU.x to $DEST"
 
-  mkdir -p $DEST && cp release/objects/GiBUU.x $DEST
-  [[ $? -ne 0 ]] && die "Fail to copy GiBUU.x"
+  mkdir -p "$DEST" || die "Fail to create $DEST"
+  cp release/objects/GiBUU.x "$DEST" || die "Fail to copy GiBUU.x"
 
   exit 0
 }
@@ -126,5 +120,5 @@ case "$1" in
   install)  shift; install "$@" ;;
   help|-h)  shift; help ;;
   usage|--usage|-u) shift; usage ;;
-  *)        usage ;;
+  *)        usage; exit 1 ;;
 esac
