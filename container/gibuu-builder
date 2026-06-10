@@ -25,6 +25,9 @@ die() {
   exit 1
 }
 
+[[ ${#PKGS[@]} -eq ${#PKG_URLS[@]} && ${#PKGS[@]} -eq ${#PKG_FILES[@]} && ${#PKGS[@]} -eq ${#PKG_CHECKSUMS[@]} ]] \
+  || die "Package array length mismatch"
+
 pkg_idx() {
   local name="$1" idx
   for idx in "${!PKGS[@]}"; do
@@ -121,6 +124,7 @@ checksum() {
     local expected="${PKG_CHECKSUMS[$idx]}"
 
     [[ -z "$file" || -z "$expected" ]] && die "No checksum for $name"
+    [[ ! -f "$file" ]] && die "File not found: $file (run download first)"
     actual=$(md5sum "$file" | cut -d' ' -f1)
     if [[ "$actual" != "$expected" ]]; then
       echo "FAIL: $name ($file)" >&2
@@ -160,7 +164,7 @@ build() {
 }
 
 install() {
-  DEST=${1:-./}
+  DEST="${1:-./}"
   echo "Copying GiBUU.x to $DEST"
 
   mkdir -p "$DEST" || die "Fail to create $DEST"
