@@ -85,27 +85,32 @@ download() {
   local target="${1:-all}"
 
   if [[ "$target" == "all" ]]; then
-    fetch root
-    git_clone "${PKG_URLS[1]}" release "$branch"
-    git_clone "${PKG_URLS[2]}" libraries/RootTuple "$branch"
-    fetch buuinput
+    targets=("${PKGS[@]}")
   else
-    case "$target" in
-      root)      fetch root ;;
-      gibuu)     git_clone "${PKG_URLS[1]}" release "$branch" ;;
-      roottuple) git_clone "${PKG_URLS[2]}" libraries/RootTuple "$branch" ;;
-      buuinput)  fetch buuinput ;;
-      *)         die "Unknown package: $target. Use: root, gibuu, roottuple, buuinput" ;;
-    esac
+    targets=("$target")
   fi
+
+  for name in "${targets[@]}"; do
+    local idx=$(pkg_idx "$name")
+    if [[ $idx -eq 1 ]]; then
+      git_clone "${PKG_URLS[$idx]}" release "$branch"
+    elif [[ $idx -eq 2 ]]; then
+      git_clone "${PKG_URLS[$idx]}" libraries/RootTuple "$branch"
+    else
+      fetch "$name"
+    fi
+  done
 }
 
 checksum() {
   local target="${1:-all}"
   local failed=0
+  local pkgs=()
 
   if [[ "$target" == "all" ]]; then
-    pkgs=("root" "buuinput")
+    for idx in "${!PKGS[@]}"; do
+      [[ -n "${PKG_CHECKSUMS[$idx]}" ]] && pkgs+=("${PKGS[$idx]}")
+    done
   else
     pkgs=("$target")
   fi
