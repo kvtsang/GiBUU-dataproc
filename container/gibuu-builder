@@ -6,8 +6,6 @@ gibuu_git_url="https://github.com/kvtsang/GiBUU.git"
 roottuple_git_url="https://github.com/kvtsang/GiBUU-RootTuple.git"
 buuinput_download_url="https://gibuu.hepforge.org/downloads?f=buuinput2025.tar.gz"
 
-GIBUU_BRANCH="hepforge"
-ROOTTUPLE_BRANCH="hepforge"
 
 die() {
   echo "$@" >&2
@@ -16,8 +14,8 @@ die() {
 
 git_clone() {
   local url="$1"
-  local branch="$2"
-  local dest="$3"
+  local dest="$2"
+  local branch="${3:-main}"
   git clone --branch "$branch" --depth 1 "$url" "$dest" \
 	  || die "Fail to clone $url"
 }
@@ -38,13 +36,16 @@ $PROGRAM download
     - $root_download_url (wget)
     - $gibuu_git_url → release/ (git clone)
     - $roottuple_git_url → libraries/RootTuple/ (git clone)
-    - $buuinput_download_url (wget)
+    - $buuinput_download_url → buuinput2025.tar.gz (wget, same dir as release/)
+
+$PROGRAM download [branch_or_tag]
+    Clone GiBUU and RootTuple from the given branch or tag. Omit for 'main', or use 'hepforge' for the hepforge branch.
 
 $PROGRAM checksum
     Run md5sum on the downloaded files.
 
 $PROGRAM unpack
-    Unzip / untar downlaod files to current directory.
+    Unzip / untar download files to current directory.
 
 $PROGRAM build
     Build GiBUU.
@@ -58,8 +59,8 @@ _EOF
 download() {
   echo "Downloading ..."
   wget -N "$root_download_url" \
-  && git_clone "$gibuu_git_url" "$GIBUU_BRANCH" release \
-  && git_clone "$roottuple_git_url" "$ROOTTUPLE_BRANCH" libraries/RootTuple \
+  && git_clone "$gibuu_git_url" "release" "${1:-main}" \
+  && git_clone "$roottuple_git_url" "libraries/RootTuple" "${1:-main}" \
   && wget -N --content-disposition "$buuinput_download_url"
 
   [[ $? -ne 0 ]] && die "Fail to download file(s)"
@@ -81,7 +82,10 @@ unpack() {
 
   echo "Setting up GiBUU ..."
 
-  tar zxf buuinput2025.tar.gz
+  mkdir -p gibuu && pushd gibuu
+  [[ $? -ne 0 ]] && die "Fail to \"mkdir gibuu\""
+
+  tar zxf ../buuinput2025.tar.gz
 
   [[ $? -ne 0 ]] && die "Fail to unpack GiBUU"
 
@@ -109,7 +113,7 @@ install() {
 }
 
 usage() {
-  echo "$PROGRAM downlaod|checksum|unpack|build|install|help [DEST]"
+  echo "$PROGRAM download|checksum|unpack|build|install|help|usage [DEST]"
 }
 
 PROGRAM="${0##*/}"
@@ -117,9 +121,10 @@ PROGRAM="${0##*/}"
 case "$1" in
   download) shift; download "$@" ;;
   checksum) shift; checksum "$@" ;;
-  unpack)   shift; unpack "$@" ;; 
-  build)    shift; build "$@" ;; 
+  unpack)   shift; unpack "$@" ;;
+  build)    shift; build "$@" ;;
   install)  shift; install "$@" ;;
-  help)     shift; help ;;
+  help|-h)  shift; help ;;
+  usage|--usage|-u) shift; usage ;;
   *)        usage ;;
 esac
