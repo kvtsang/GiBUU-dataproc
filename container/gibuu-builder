@@ -1,14 +1,36 @@
 #!/bin/bash
-root_download_url="https://root.cern.ch/download/\
-root_v6.38.04.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz"
-gibuu_git_url="https://github.com/kvtsang/GiBUU.git"
-roottuple_git_url="https://github.com/kvtsang/GiBUU-RootTuple.git"
-buuinput_download_url="https://gibuu.hepforge.org/downloads?f=buuinput2025.tar.gz"
-
+# Package index: 0=root, 1=gibuu, 2=roottuple, 3=buuinput
+PKGS=(root gibuu roottuple buuinput)
+PKG_URLS=(
+  "https://root.cern.ch/download/root_v6.38.04.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz"
+  "https://github.com/kvtsang/GiBUU.git"
+  "https://github.com/kvtsang/GiBUU-RootTuple.git"
+  "https://gibuu.hepforge.org/downloads?f=buuinput2025.tar.gz"
+)
+PKG_FILES=(
+  "root_v6.38.04.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz"
+  ""
+  ""
+  "buuinput2025.tar.gz"
+)
+PKG_CHECKSUMS=(
+  "af241e9b4aeb93f6fedfb5d360b31494"
+  ""
+  ""
+  "6d8d5c432008831ddeea38e7b91550ee"
+)
 
 die() {
   echo "$@" >&2
   exit 1
+}
+
+pkg_idx() {
+  local name="$1" idx
+  for idx in "${!PKGS[@]}"; do
+    [[ "${PKGS[$idx]}" == "$name" ]] && echo "$idx" && return
+  done
+  die "Unknown package: $name"
 }
 
 git_clone() {
@@ -17,6 +39,15 @@ git_clone() {
   local branch="${3:-main}"
   git clone --branch "$branch" --depth 1 "$url" "$dest" \
 	  || die "Fail to clone $url"
+}
+
+fetch() {
+  local name="$1"
+  local idx=$(pkg_idx "$name")
+  local url="${PKG_URLS[$idx]}"
+  local file="${PKG_FILES[$idx]}"
+
+  wget -N -O "$file" "$url" || die "Fail to download $name ($file)"
 }
 
 help() {
@@ -30,18 +61,12 @@ The script is intended to be used in container.
 
 Usage
 =====
-$PROGRAM download
-    Download following files to current directory:
-    - $root_download_url (wget)
-    - $gibuu_git_url → release/ (git clone)
-    - $roottuple_git_url → libraries/RootTuple/ (git clone)
-    - $buuinput_download_url → buuinput2025.tar.gz (wget, same dir as release/)
+$PROGRAM download [package] [branch]
+    Download packages (all by default). branch defaults to 'main'.
+    Packages: root, gibuu, roottuple, buuinput
 
-$PROGRAM download [branch_or_tag]
-    Clone GiBUU and RootTuple from the given branch or tag. Omit for 'main', or use 'hepforge' for the hepforge branch.
-
-$PROGRAM checksum
-    Run md5sum on the downloaded files.
+$PROGRAM checksum [package]
+    Run md5sum on downloaded files (all by default).
 
 $PROGRAM unpack
     Unzip / untar download files to current directory.
@@ -56,32 +81,65 @@ _EOF
 }
 
 download() {
-  echo "Downloading ..."
-  wget -N "$root_download_url" \
-  && git_clone "$gibuu_git_url" "release" "${1:-main}" \
-  && git_clone "$roottuple_git_url" "libraries/RootTuple" "${1:-main}" \
-  && wget -N --content-disposition "$buuinput_download_url"
+  local branch="${2:-main}"
+  local target="${1:-all}"
 
-  [[ $? -ne 0 ]] && die "Fail to download file(s)"
+  if [[ "$target" == "all" ]]; then
+    fetch root
+    git_clone "${PKG_URLS[1]}" release "$branch"
+    git_clone "${PKG_URLS[2]}" libraries/RootTuple "$branch"
+    fetch buuinput
+  else
+    case "$target" in
+      root)      fetch root ;;
+      gibuu)     git_clone "${PKG_URLS[1]}" release "$branch" ;;
+      roottuple) git_clone "${PKG_URLS[2]}" libraries/RootTuple "$branch" ;;
+      buuinput)  fetch buuinput ;;
+      *)         die "Unknown package: $target. Use: root, gibuu, roottuple, buuinput" ;;
+    esac
+  fi
 }
 
 checksum() {
-  cat <<'_EOF' | md5sum -c || die "Checksum verification failed"
-6d8d5c432008831ddeea38e7b91550ee  buuinput2025.tar.gz
-af241e9b4aeb93f6fedfb5d360b31494  root_v6.38.04.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz
-_EOF
+  local target="${1:-all}"
+  local failed=0
+
+  if [[ "$target" == "all" ]]; then
+    pkgs=("root" "buuinput")
+  else
+    pkgs=("$target")
+  fi
+
+  for name in "${pkgs[@]}"; do
+    local idx=$(pkg_idx "$name")
+    local file="${PKG_FILES[$idx]}"
+    local expected="${PKG_CHECKSUMS[$idx]}"
+
+    [[ -z "$file" || -z "$expected" ]] && die "No checksum for $name"
+    actual=$(md5sum "$file" | cut -d' ' -f1)
+    if [[ "$actual" != "$expected" ]]; then
+      echo "FAIL: $name ($file)" >&2
+      echo "  expected: $expected" >&2
+      echo "  actual:   $actual" >&2
+      failed=1
+    else
+      echo "OK: $name ($file)"
+    fi
+  done
+
+  [[ $failed -ne 0 ]] && die "Checksum verification failed"
 }
 
 unpack() {
   echo "Unpacking ROOT ..."
-  tar zxf $(basename "$root_download_url") || die "Fail to unpack ROOT"
+  tar zxf "${PKG_FILES[0]}" || die "Fail to unpack ROOT"
 
   echo "Setting up GiBUU ..."
 
   mkdir -p gibuu || die "Fail to create gibuu/"
   cd gibuu || die "Fail to enter gibuu/"
 
-  tar zxf ../buuinput2025.tar.gz || die "Fail to unpack GiBUU"
+  tar zxf ../"${PKG_FILES[3]}" || die "Fail to unpack GiBUU"
 
   exit 0
 }
@@ -93,7 +151,7 @@ build() {
 
   mkdir -p objects/LIB/lib \
   && make -j $(nproc) buildRootTuple \
-  && make -j $(nproc) withROOT=1 
+  && make -j $(nproc) withROOT=1
 }
 
 install() {
@@ -107,7 +165,7 @@ install() {
 }
 
 usage() {
-  echo "$PROGRAM download|checksum|unpack|build|install|help|usage [DEST]"
+  echo "$PROGRAM download [package] [branch] | checksum [package] | unpack | build | install [DEST] | help"
 }
 
 PROGRAM="${0##*/}"
