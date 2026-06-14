@@ -150,6 +150,11 @@ unpack() {
 
   tar zxf ../"${PKG_FILES[3]}" || die "Fail to unpack GiBUU"
 
+  cp ../release/version.txt .
+  echo "GiBUU: $(git -C ../release rev-parse --short HEAD)" >> version.txt
+  echo "RootTuple: $(git -C ../libraries/RootTuple rev-parse --short HEAD)" \
+	  >> version.txt
+
   exit 0
 }
 
