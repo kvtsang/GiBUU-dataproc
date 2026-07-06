@@ -2,6 +2,7 @@ build-essential
 ca-certificates
 cmake
 gfortran
+git
 libbz2-dev
 libssl-dev
 libtbb-dev
@@ -13,3 +14,4 @@ make
 makedepf90
 unzip
 wget
+which
