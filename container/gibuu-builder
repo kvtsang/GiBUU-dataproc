@@ -1,23 +1,22 @@
 #!/bin/bash
-# Package index: 0=root, 1=gibuu, 2=roottuple, 3=buuinput
-PKGS=(root gibuu roottuple buuinput)
+# Check out and build GiBUU source. Assumes fetch-stable has already
+# downloaded and unpacked ROOT (root/) and buuinput (gibuu/) into the
+# same working directory.
+#
+# The source refs (branch or tag) are meant to be passed in via
+# gibuu-builder's caller, e.g. Docker ARG GIBUU_REF/ROOTTUPLE_REF, so
+# that a new commit changes the effective command and busts exactly
+# this layer's Docker cache -- and nothing upstream of it.
+#
+# Package index: 0=gibuu, 1=roottuple
+PKGS=(gibuu roottuple)
 PKG_URLS=(
-  "https://root.cern.ch/download/root_v6.38.04.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz"
   "https://github.com/kvtsang/GiBUU.git"
   "https://github.com/kvtsang/GiBUU-RootTuple.git"
-  "https://gibuu.hepforge.org/downloads?f=buuinput2025.tar.gz"
 )
-PKG_FILES=(
-  "root_v6.38.04.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz"
-  ""
-  ""
-  "buuinput2025.tar.gz"
-)
-PKG_CHECKSUMS=(
-  "af241e9b4aeb93f6fedfb5d360b31494"
-  ""
-  ""
-  "6d8d5c432008831ddeea38e7b91550ee"
+PKG_DESTS=(
+  "release"
+  "libraries/RootTuple"
 )
 
 die() {
@@ -25,15 +24,15 @@ die() {
   exit 1
 }
 
-[[ ${#PKGS[@]} -eq ${#PKG_URLS[@]} && ${#PKGS[@]} -eq ${#PKG_FILES[@]} && ${#PKGS[@]} -eq ${#PKG_CHECKSUMS[@]} ]] \
+[[ ${#PKGS[@]} -eq ${#PKG_URLS[@]} && ${#PKGS[@]} -eq ${#PKG_DESTS[@]} ]] \
   || die "Package array length mismatch"
 
 pkg_idx() {
   local name="$1" idx
   for idx in "${!PKGS[@]}"; do
-    [[ "${PKGS[$idx]}" == "$name" ]] && echo "$idx" && return
+    [[ "${PKGS[$idx]}" == "$name" ]] && echo "$idx" && return 0
   done
-  die "Unknown package: $name"
+  return 1
 }
 
 git_clone() {
@@ -44,35 +43,25 @@ git_clone() {
 	  || die "Fail to clone $url"
 }
 
-fetch() {
-  local name="$1"
-  local idx=$(pkg_idx "$name")
-  local url="${PKG_URLS[$idx]}"
-  local file="${PKG_FILES[$idx]}"
-
-  wget -N -O "$file" "$url" || die "Fail to download $name ($file)"
-}
-
 help() {
   cat <<-_EOF
-$PROGRAM: install GiBUU to a user directory
+$PROGRAM: check out and build GiBUU source
 
 Note
 ====
-The patched GiBUU is installed to the directory where the script is executed.
-The script is intended to be used in container.
+Run after fetch-stable has downloaded and unpacked ROOT and buuinput
+into the same working directory. The patched GiBUU is installed to
+the directory where the script is executed. The script is intended
+to be used in container.
 
 Usage
 =====
 $PROGRAM download [package] [branch]
-    Download packages (all by default). branch defaults to 'main'.
-    Packages: root, gibuu, roottuple, buuinput
+    Checkout GiBUU source (all by default). branch defaults to 'main'.
+    Packages: gibuu, roottuple
 
-$PROGRAM checksum [package]
-    Run md5sum on downloaded files (all by default).
-
-$PROGRAM unpack
-    Unzip / untar download files to current directory.
+$PROGRAM version
+    Write version.txt (GiBUU + RootTuple git SHAs) into gibuu/.
 
 $PROGRAM build
     Build GiBUU.
@@ -84,8 +73,9 @@ _EOF
 }
 
 download() {
-  local branch="${2:-main}"
   local target="${1:-all}"
+  local branch="${2:-main}"
+  local targets
 
   if [[ "$target" == "all" ]]; then
     targets=("${PKGS[@]}")
@@ -94,68 +84,18 @@ download() {
   fi
 
   for name in "${targets[@]}"; do
-    local idx=$(pkg_idx "$name")
-    if [[ $idx -eq 1 ]]; then
-      git_clone "${PKG_URLS[$idx]}" release "$branch"
-    elif [[ $idx -eq 2 ]]; then
-      git_clone "${PKG_URLS[$idx]}" libraries/RootTuple "$branch"
-    else
-      fetch "$name"
-    fi
+    local idx
+    idx=$(pkg_idx "$name") || die "Unknown package: $name"
+    git_clone "${PKG_URLS[$idx]}" "${PKG_DESTS[$idx]}" "$branch"
   done
 }
 
-checksum() {
-  local target="${1:-all}"
-  local failed=0
-  local pkgs=()
-
-  if [[ "$target" == "all" ]]; then
-    for idx in "${!PKGS[@]}"; do
-      [[ -n "${PKG_CHECKSUMS[$idx]}" ]] && pkgs+=("${PKGS[$idx]}")
-    done
-  else
-    pkgs=("$target")
-  fi
-
-  for name in "${pkgs[@]}"; do
-    local idx=$(pkg_idx "$name")
-    local file="${PKG_FILES[$idx]}"
-    local expected="${PKG_CHECKSUMS[$idx]}"
-
-    [[ -z "$file" || -z "$expected" ]] && die "No checksum for $name"
-    [[ ! -f "$file" ]] && die "File not found: $file (run download first)"
-    actual=$(md5sum "$file" | cut -d' ' -f1)
-    if [[ "$actual" != "$expected" ]]; then
-      echo "FAIL: $name ($file)" >&2
-      echo "  expected: $expected" >&2
-      echo "  actual:   $actual" >&2
-      failed=1
-    else
-      echo "OK: $name ($file)"
-    fi
-  done
-
-  [[ $failed -ne 0 ]] && die "Checksum verification failed"
-}
-
-unpack() {
-  echo "Unpacking ROOT ..."
-  tar zxf "${PKG_FILES[0]}" || die "Fail to unpack ROOT"
-
-  echo "Setting up GiBUU ..."
-
-  mkdir -p gibuu || die "Fail to create gibuu/"
-  cd gibuu || die "Fail to enter gibuu/"
-
-  tar zxf ../"${PKG_FILES[3]}" || die "Fail to unpack GiBUU"
-
-  cp ../release/version.txt .
+version() {
+  cd gibuu || die "gibuu/ directory not found (run 'fetch-stable unpack' first)"
+  cp ../release/version.txt . || die "Fail to copy version.txt"
   echo "GiBUU: $(git -C ../release rev-parse --short HEAD)" >> version.txt
   echo "RootTuple: $(git -C ../libraries/RootTuple rev-parse --short HEAD)" \
 	  >> version.txt
-
-  exit 0
 }
 
 build() {
@@ -179,15 +119,14 @@ install() {
 }
 
 usage() {
-  echo "$PROGRAM download [package] [branch] | checksum [package] | unpack | build | install [DEST] | help"
+  echo "$PROGRAM download [package] [branch] | version | build | install [DEST] | help"
 }
 
 PROGRAM="${0##*/}"
 
 case "$1" in
   download) shift; download "$@" ;;
-  checksum) shift; checksum "$@" ;;
-  unpack)   shift; unpack "$@" ;;
+  version)  shift; version "$@" ;;
   build)    shift; build "$@" ;;
   install)  shift; install "$@" ;;
   help|-h)  shift; help ;;

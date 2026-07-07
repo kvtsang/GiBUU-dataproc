@@ -1,0 +1,148 @@
+#!/bin/bash
+# Fetch and unpack the stable, checksum-pinned dependencies: ROOT and
+# buuinput. Both are large, versioned downloads that change far less
+# often than the GiBUU/RootTuple source (see gibuu-builder). Keeping
+# this logic in its own file means editing gibuu-builder (build/install
+# logic, source refs) never busts the Docker layer cache for these
+# downloads.
+#
+# Package index: 0=root, 1=buuinput
+PKGS=(root buuinput)
+PKG_URLS=(
+  "https://root.cern.ch/download/root_v6.38.04.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz"
+  "https://gibuu.hepforge.org/downloads?f=buuinput2025.tar.gz"
+)
+PKG_FILES=(
+  "root_v6.38.04.Linux-ubuntu24.04-x86_64-gcc13.3.tar.gz"
+  "buuinput2025.tar.gz"
+)
+PKG_CHECKSUMS=(
+  "af241e9b4aeb93f6fedfb5d360b31494"
+  "6d8d5c432008831ddeea38e7b91550ee"
+)
+
+die() {
+  echo "$@" >&2
+  exit 1
+}
+
+[[ ${#PKGS[@]} -eq ${#PKG_URLS[@]} && ${#PKGS[@]} -eq ${#PKG_FILES[@]} \
+   && ${#PKGS[@]} -eq ${#PKG_CHECKSUMS[@]} ]] \
+  || die "Package array length mismatch"
+
+pkg_idx() {
+  local name="$1" idx
+  for idx in "${!PKGS[@]}"; do
+    [[ "${PKGS[$idx]}" == "$name" ]] && echo "$idx" && return 0
+  done
+  return 1
+}
+
+fetch() {
+  local name="$1"
+  local idx
+  idx=$(pkg_idx "$name") || die "Unknown package: $name"
+  local url="${PKG_URLS[$idx]}"
+  local file="${PKG_FILES[$idx]}"
+
+  wget -N -O "$file" "$url" || die "Fail to download $name ($file)"
+}
+
+help() {
+  cat <<-_EOF
+$PROGRAM: fetch and unpack stable, checksum-pinned dependencies
+
+Note
+====
+Downloads ROOT and buuinput. Both are large and effectively immutable
+per release, so this step is meant to stay a Docker cache hit across
+rebuilds that only touch GiBUU source (see gibuu-builder).
+
+Usage
+=====
+$PROGRAM download [package]
+    Download packages (all by default). Packages: root, buuinput
+
+$PROGRAM checksum [package]
+    Run md5sum on downloaded files (all by default).
+
+$PROGRAM unpack
+    Unpack ROOT to root/ and buuinput to gibuu/.
+
+_EOF
+}
+
+download() {
+  local target="${1:-all}"
+  local targets
+
+  if [[ "$target" == "all" ]]; then
+    targets=("${PKGS[@]}")
+  else
+    targets=("$target")
+  fi
+
+  for name in "${targets[@]}"; do
+    fetch "$name"
+  done
+}
+
+checksum() {
+  local target="${1:-all}"
+  local failed=0
+  local pkgs=()
+
+  if [[ "$target" == "all" ]]; then
+    pkgs=("${PKGS[@]}")
+  else
+    pkgs=("$target")
+  fi
+
+  for name in "${pkgs[@]}"; do
+    local idx
+    idx=$(pkg_idx "$name") || die "Unknown package: $name"
+    local file="${PKG_FILES[$idx]}"
+    local expected="${PKG_CHECKSUMS[$idx]}"
+
+    [[ ! -f "$file" ]] && die "File not found: $file (run download first)"
+    actual=$(md5sum "$file" | cut -d' ' -f1)
+    if [[ "$actual" != "$expected" ]]; then
+      echo "FAIL: $name ($file)" >&2
+      echo "  expected: $expected" >&2
+      echo "  actual:   $actual" >&2
+      failed=1
+    else
+      echo "OK: $name ($file)"
+    fi
+  done
+
+  [[ $failed -ne 0 ]] && die "Checksum verification failed"
+
+  exit 0
+}
+
+unpack() {
+  echo "Unpacking ROOT ..."
+  tar zxf "${PKG_FILES[0]}" || die "Fail to unpack ROOT"
+
+  echo "Unpacking buuinput ..."
+  mkdir -p gibuu || die "Fail to create gibuu/"
+  tar zxf "${PKG_FILES[1]}" -C gibuu || die "Fail to unpack buuinput"
+
+  exit 0
+}
+
+usage() {
+  echo "$PROGRAM download [package] | checksum [package] | unpack | help"
+}
+
+PROGRAM="${0##*/}"
+
+case "$1" in
+  download) shift; download "$@" ;;
+  checksum) shift; checksum "$@" ;;
+  unpack)   shift; unpack "$@" ;;
+  help|-h)  shift; help ;;
+  usage|--usage|-u) shift; usage ;;
+  *)        usage; exit 1 ;;
+esac

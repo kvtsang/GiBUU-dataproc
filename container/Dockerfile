@@ -12,25 +12,44 @@ RUN apt-get update \
 
 # =========================================================
 # Stage 2: prebuild
+#
+# Stable, checksum-pinned downloads only (ROOT, buuinput). This stage
+# never references GiBUU source, so it stays a Docker cache hit across
+# every rebuild that only touches GiBUU/RootTuple code -- only rerun
+# when packages/checksums/URLs in fetch-stable itself change.
 # =========================================================
 FROM base AS prebuild
 
 WORKDIR /opt
-COPY gibuu-builder gibuu-builder
-RUN ./gibuu-builder download 
+COPY fetch-stable fetch-stable
+
+RUN ./fetch-stable download root
+RUN ./fetch-stable download buuinput
+RUN ./fetch-stable checksum
+RUN ./fetch-stable unpack
 
 # =========================================================
-# Stage 3: builder 
+# Stage 3: builder
+#
+# Volatile GiBUU/RootTuple source checkout + compile. GIBUU_REF and
+# ROOTTUPLE_REF are build args so that pointing them at a new commit
+# (e.g. --build-arg GIBUU_REF=$(git ls-remote ... main)) changes this
+# layer's cache key and forces a rebuild -- without touching the
+# prebuild stage above.
 # =========================================================
 FROM prebuild AS builder
 
 WORKDIR /opt
+COPY gibuu-builder gibuu-builder
 
-# fIXME
-RUN ./gibuu-builder checksum; exit 0
-RUN ./gibuu-builder unpack
+ARG GIBUU_REF=main
+ARG ROOTTUPLE_REF=main
+
+RUN ./gibuu-builder download gibuu "${GIBUU_REF}"
+RUN ./gibuu-builder download roottuple "${ROOTTUPLE_REF}"
+RUN ./gibuu-builder version
 RUN ./gibuu-builder build
-RUN ./gibuu-builder install /opt/bin 
+RUN ./gibuu-builder install /opt/bin
 
 # =========================================================
 # Stage 4: runtime
