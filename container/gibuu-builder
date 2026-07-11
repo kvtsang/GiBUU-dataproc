@@ -20,6 +20,12 @@ PKG_DESTS=(
   "libraries/RootTuple"
 )
 
+# Refusing to build against these moving refs by default is the
+# production-campaign guard for issue-007 item 3: a bare `download`
+# with no ref, or an explicit `main`/`master`/`develop`, must be
+# opted into via --allow-branch rather than silently succeeding.
+BRANCH_DENYLIST=(main master develop)
+
 die() {
   echo "$@" >&2
   exit 1
@@ -42,6 +48,14 @@ is_full_sha() {
 
 is_commit_hash() {
   [[ "$1" =~ ^[0-9a-f]{7,40}$ ]]
+}
+
+is_denied_branch() {
+  local ref="$1" b
+  for b in "${BRANCH_DENYLIST[@]}"; do
+    [[ "$ref" == "$b" ]] && return 0
+  done
+  return 1
 }
 
 git_clone() {
@@ -83,13 +97,18 @@ to be used in container.
 
 Usage
 =====
-$PROGRAM download [package] [ref]
+$PROGRAM download [--allow-branch] [package] [ref]
     Checkout GiBUU source (all by default). ref defaults to 'main';
     it may be a branch, a tag, or a commit SHA (7-40 hex chars). A
     full 40-char SHA is fetched shallow; an abbreviated SHA falls
     back to a full clone (GitHub only serves shallow fetches for a
     full SHA).
     Packages: gibuu, roottuple
+
+    Refuses 'main'/'master'/'develop' (including the omitted-ref
+    default) unless --allow-branch is passed -- pin to a tag or
+    commit SHA for any production build. --allow-branch is an escape
+    hatch for local testing against a moving branch.
 
 $PROGRAM version
     Append GiBUU + RootTuple git SHAs to release/version.txt (the file
@@ -106,9 +125,21 @@ _EOF
 }
 
 download() {
+  local allow_branch=0
+  while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+      --allow-branch) allow_branch=1; shift ;;
+      *) die "Unknown option: $1" ;;
+    esac
+  done
+
   local target="${1:-all}"
   local ref="${2:-main}"
   local targets
+
+  if (( ! allow_branch )) && is_denied_branch "$ref"; then
+    die "Refusing to build against moving branch '$ref' without --allow-branch -- pin to a tag or commit SHA for a production build (e.g. 'download $target v1.2.3'), or pass --allow-branch to override for local testing."
+  fi
 
   if [[ "$target" == "all" ]]; then
     targets=("${PKGS[@]}")
@@ -159,7 +190,7 @@ install() {
 }
 
 usage() {
-  echo "$PROGRAM download [package] [ref] | version | build | install [DEST] | help"
+  echo "$PROGRAM download [--allow-branch] [package] [ref] | version | build | install [DEST] | help"
 }
 
 PROGRAM="${0##*/}"

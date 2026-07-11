@@ -35,49 +35,72 @@ Run from this directory (`src/gibuu-dataprod/container/`).
 ### Docker
 
 ```sh
-docker build -t gibuu:local .
+docker build \
+  --build-arg GIBUU_REF=v1.2.3 \
+  --build-arg ROOTTUPLE_REF=v1.2.3 \
+  -t gibuu:local .
 ```
 
 ### Podman
 
 ```sh
-podman build -t gibuu:local .
+podman build \
+  --build-arg GIBUU_REF=v1.2.3 \
+  --build-arg ROOTTUPLE_REF=v1.2.3 \
+  -t gibuu:local .
 ```
 
-Both default `GIBUU_REF` and `ROOTTUPLE_REF` to `main`. To build a
-specific tag/branch/commit of either repo instead:
+`GIBUU_REF` and `ROOTTUPLE_REF` have **no default** — a bare
+`docker build .`/`podman build .` fails fast in the `builder` stage
+with a missing-build-arg error rather than silently building against
+the moving `main` branch. Both are required on every invocation.
+
+`GIBUU_REF`/`ROOTTUPLE_REF` accept a tag or a commit SHA (7-40 hex
+chars). A full 40-char SHA is fetched shallow (`git fetch --depth 1`,
+which GitHub serves for a full SHA); an abbreviated SHA falls back to
+a full clone since GitHub won't resolve a short SHA server-side.
+
+A branch name (including `main`, `master`, `develop`) is refused with
+a "Refusing to build against moving branch" error — a branch keeps
+moving underneath a multi-week production campaign, unlike a tag or
+SHA. For local testing against a branch, opt in explicitly:
 
 ```sh
 docker build \
   --build-arg GIBUU_REF=my-feature-branch \
-  --build-arg ROOTTUPLE_REF=main \
+  --build-arg ROOTTUPLE_REF=v1.2.3 \
+  --build-arg ALLOW_BRANCH_REF=1 \
   -t gibuu:local .
 ```
 
-`GIBUU_REF`/`ROOTTUPLE_REF` accept a branch, a tag, or a commit SHA
-(7-40 hex chars). A full 40-char SHA is fetched shallow (`git fetch
---depth 1`, which GitHub serves for a full SHA); an abbreviated SHA
-falls back to a full clone since GitHub won't resolve a short SHA
-server-side.
+Never pass `ALLOW_BRANCH_REF` for a build feeding a production
+campaign.
+
+The resolved refs are stamped onto the runtime image as
+`gibuu_ref`/`roottuple_ref` OCI labels, so `docker inspect
+--format '{{json .Config.Labels}}' gibuu:local` (or `podman inspect`)
+recovers exactly what was built even without re-reading the build
+log.
 
 ### Debugging a single stage
 
 ```sh
 docker build --target prebuild -t gibuu:prebuild .
-docker build --target builder  -t gibuu:builder .
+docker build --target builder --build-arg GIBUU_REF=v1.2.3 \
+  --build-arg ROOTTUPLE_REF=v1.2.3 -t gibuu:builder .
 ```
 
 (same flags work with `podman build`)
 
 ## Rebuilding after a GiBUU/RootTuple source change
 
-Passing `--build-arg GIBUU_REF=main` again does **not** by itself
-force a re-clone: the build-arg value is unchanged, so the cache key
-for that layer is unchanged, so both Docker and Podman will happily
-reuse the stale clone from a previous build. Pick one:
+Passing the same `--build-arg GIBUU_REF=<ref>` again does **not** by
+itself force a re-clone: the build-arg value is unchanged, so the
+cache key for that layer is unchanged, so both Docker and Podman will
+happily reuse the stale clone from a previous build. Pick one:
 
-- **Pin to a tag/branch/commit SHA you actually cut** for the new
-  state (e.g. a release tag, or the exact commit SHA) and pass it as
+- **Pin to the new tag/commit SHA you actually cut** for the new
+  state (a release tag, or the exact commit SHA) and pass it as
   `GIBUU_REF`/`ROOTTUPLE_REF`. Preferred — reproducible, and works
   identically on Docker and Podman.
 - **Docker/buildx only** — force just the volatile stage to rerun
@@ -113,3 +136,9 @@ no extra environment setup is required.
 - **`Unknown package: <name>`** — typo in a `download`/`checksum`
   argument; valid names are `root`/`buuinput` for `fetch-stable` and
   `gibuu`/`roottuple` for `gibuu-builder`.
+- **`GIBUU_REF and ROOTTUPLE_REF must be set explicitly`** — no
+  `--build-arg` was passed for one or both; see Building above.
+- **`Refusing to build against moving branch`** — `GIBUU_REF`/
+  `ROOTTUPLE_REF` resolved to `main`/`master`/`develop`. Pin to a tag
+  or commit SHA, or pass `--build-arg ALLOW_BRANCH_REF=1` for local
+  testing only.
