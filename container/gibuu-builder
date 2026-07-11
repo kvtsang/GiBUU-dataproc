@@ -3,10 +3,11 @@
 # downloaded and unpacked ROOT (root/) and buuinput (gibuu/) into the
 # same working directory.
 #
-# The source refs (branch or tag) are meant to be passed in via
-# gibuu-builder's caller, e.g. Docker ARG GIBUU_REF/ROOTTUPLE_REF, so
-# that a new commit changes the effective command and busts exactly
-# this layer's Docker cache -- and nothing upstream of it.
+# The source refs (branch, tag, or full commit SHA) are meant to be
+# passed in via gibuu-builder's caller, e.g. Docker ARG GIBUU_REF/
+# ROOTTUPLE_REF, so that a new commit changes the effective command
+# and busts exactly this layer's Docker cache -- and nothing upstream
+# of it.
 #
 # Package index: 0=gibuu, 1=roottuple
 PKGS=(gibuu roottuple)
@@ -35,12 +36,38 @@ pkg_idx() {
   return 1
 }
 
+is_full_sha() {
+  [[ "$1" =~ ^[0-9a-f]{40}$ ]]
+}
+
+is_commit_hash() {
+  [[ "$1" =~ ^[0-9a-f]{7,40}$ ]]
+}
+
 git_clone() {
   local url="$1"
   local dest="$2"
-  local branch="${3:-main}"
-  git clone --branch "$branch" --depth 1 "$url" "$dest" \
-	  || die "Fail to clone $url"
+  local ref="${3:-main}"
+
+  if is_full_sha "$ref"; then
+    # GitHub's upload-pack serves a shallow fetch for a full 40-char
+    # SHA even though `git clone --branch` only accepts branch/tag
+    # names.
+    git init -q "$dest" \
+      && git -C "$dest" remote add origin "$url" \
+      && git -C "$dest" fetch --depth 1 origin "$ref" \
+      && git -C "$dest" checkout -q FETCH_HEAD \
+      || die "Fail to clone $url at $ref"
+  elif is_commit_hash "$ref"; then
+    # An abbreviated SHA can't be resolved server-side, so it needs
+    # the full history to check out locally -- no shallow fetch.
+    git clone -q "$url" "$dest" \
+      && git -C "$dest" checkout -q "$ref" \
+      || die "Fail to clone $url at $ref"
+  else
+    git clone --branch "$ref" --depth 1 "$url" "$dest" \
+      || die "Fail to clone $url"
+  fi
 }
 
 help() {
@@ -56,12 +83,18 @@ to be used in container.
 
 Usage
 =====
-$PROGRAM download [package] [branch]
-    Checkout GiBUU source (all by default). branch defaults to 'main'.
+$PROGRAM download [package] [ref]
+    Checkout GiBUU source (all by default). ref defaults to 'main';
+    it may be a branch, a tag, or a commit SHA (7-40 hex chars). A
+    full 40-char SHA is fetched shallow; an abbreviated SHA falls
+    back to a full clone (GitHub only serves shallow fetches for a
+    full SHA).
     Packages: gibuu, roottuple
 
 $PROGRAM version
-    Write version.txt (GiBUU + RootTuple git SHAs) into gibuu/.
+    Append GiBUU + RootTuple git SHAs to release/version.txt (the file
+    the Makefile compiles into GiBUU.x's version string), then mirror
+    the result to gibuu/version.txt for runtime extraction.
 
 $PROGRAM build
     Build GiBUU.
@@ -74,7 +107,7 @@ _EOF
 
 download() {
   local target="${1:-all}"
-  local branch="${2:-main}"
+  local ref="${2:-main}"
   local targets
 
   if [[ "$target" == "all" ]]; then
@@ -86,16 +119,23 @@ download() {
   for name in "${targets[@]}"; do
     local idx
     idx=$(pkg_idx "$name") || die "Unknown package: $name"
-    git_clone "${PKG_URLS[$idx]}" "${PKG_DESTS[$idx]}" "$branch"
+    git_clone "${PKG_URLS[$idx]}" "${PKG_DESTS[$idx]}" "$ref"
   done
 }
 
 version() {
-  cd gibuu || die "gibuu/ directory not found (run 'fetch-stable unpack' first)"
-  cp ../release/version.txt . || die "Fail to copy version.txt"
-  echo "GiBUU: $(git -C ../release rev-parse --short HEAD)" >> version.txt
-  echo "RootTuple: $(git -C ../libraries/RootTuple rev-parse --short HEAD)" \
-	  >> version.txt
+  [[ -f release/version.txt ]] \
+    || die "release/version.txt not found (run 'download gibuu' first)"
+  [[ -d gibuu ]] || die "gibuu/ directory not found (run 'fetch-stable unpack' first)"
+
+  if ! grep -q '^GiBUU:' release/version.txt; then
+    {
+      echo "GiBUU: $(git -C release rev-parse --short HEAD)"
+      echo "RootTuple: $(git -C libraries/RootTuple rev-parse --short HEAD)"
+    } >> release/version.txt || die "Fail to append SHAs to release/version.txt"
+  fi
+
+  cp release/version.txt gibuu/version.txt || die "Fail to copy version.txt"
 }
 
 build() {
@@ -119,7 +159,7 @@ install() {
 }
 
 usage() {
-  echo "$PROGRAM download [package] [branch] | version | build | install [DEST] | help"
+  echo "$PROGRAM download [package] [ref] | version | build | install [DEST] | help"
 }
 
 PROGRAM="${0##*/}"

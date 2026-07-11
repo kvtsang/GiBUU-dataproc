@@ -45,7 +45,7 @@ podman build -t gibuu:local .
 ```
 
 Both default `GIBUU_REF` and `ROOTTUPLE_REF` to `main`. To build a
-specific tag/branch of either repo instead:
+specific tag/branch/commit of either repo instead:
 
 ```sh
 docker build \
@@ -54,9 +54,11 @@ docker build \
   -t gibuu:local .
 ```
 
-`GIBUU_REF`/`ROOTTUPLE_REF` must be a **branch or tag name**, not a
-raw commit SHA — the underlying `git clone --branch --depth 1` does
-not accept arbitrary SHAs against GitHub.
+`GIBUU_REF`/`ROOTTUPLE_REF` accept a branch, a tag, or a commit SHA
+(7-40 hex chars). A full 40-char SHA is fetched shallow (`git fetch
+--depth 1`, which GitHub serves for a full SHA); an abbreviated SHA
+falls back to a full clone since GitHub won't resolve a short SHA
+server-side.
 
 ### Debugging a single stage
 
@@ -74,9 +76,10 @@ force a re-clone: the build-arg value is unchanged, so the cache key
 for that layer is unchanged, so both Docker and Podman will happily
 reuse the stale clone from a previous build. Pick one:
 
-- **Pin to a tag/branch you actually cut** for the new state (e.g. a
-  release tag) and pass it as `GIBUU_REF`/`ROOTTUPLE_REF`. Preferred —
-  reproducible, and works identically on Docker and Podman.
+- **Pin to a tag/branch/commit SHA you actually cut** for the new
+  state (e.g. a release tag, or the exact commit SHA) and pass it as
+  `GIBUU_REF`/`ROOTTUPLE_REF`. Preferred — reproducible, and works
+  identically on Docker and Podman.
 - **Docker/buildx only** — force just the volatile stage to rerun
   without touching the cached ROOT/buuinput layers:
   ```sh
